@@ -6,6 +6,8 @@ package(
 
 licenses(["notice"])
 
+load("@protobuf_archive//:protobuf.bzl", "py_proto_library")
+
 proto_library(
     name = "argmax_matcher_proto",
     srcs = ["argmax_matcher.proto"],
