@@ -1,13 +1,13 @@
 # Description:
 #   Contains files for loading, training and evaluating TF-Slim-based models.
 
-package(default_visibility = ["//visibility:public"])
+package(
+    default_visibility = ["//visibility:public"],
+)
 
 licenses(["notice"])  # Apache 2.0
 
 exports_files(["LICENSE"])
-
-package_group(name = "internal")
 
 py_library(
     name = "dataset_utils",
@@ -73,6 +73,7 @@ py_binary(
         ":download_and_convert_cifar10",
         ":download_and_convert_flowers",
         ":download_and_convert_mnist",
+        # "//tensorflow",
     ],
 )
 
@@ -192,10 +193,13 @@ py_library(
     deps = [
         ":alexnet",
         ":cifarnet",
+        ":cyclegan",
         ":inception",
         ":lenet",
         ":mobilenet_v1",
+        ":nasnet",
         ":overfeat",
+        ":pix2pix",
         ":resnet_v1",
         ":resnet_v2",
         ":vgg",
@@ -206,6 +210,9 @@ py_library(
     name = "alexnet",
     srcs = ["nets/alexnet.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_test(
@@ -244,6 +251,9 @@ py_library(
     name = "inception_utils",
     srcs = ["nets/inception_utils.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_library(
@@ -252,6 +262,7 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":inception_utils",
+        # "//tensorflow",
     ],
 )
 
@@ -261,6 +272,7 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":inception_utils",
+        # "//tensorflow",
     ],
 )
 
@@ -270,6 +282,7 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":inception_utils",
+        # "//tensorflow",
     ],
 )
 
@@ -279,6 +292,7 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":inception_utils",
+        # "//tensorflow",
     ],
 )
 
@@ -286,6 +300,9 @@ py_library(
     name = "inception_resnet_v2",
     srcs = ["nets/inception_resnet_v2.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_test(
@@ -360,6 +377,9 @@ py_library(
     name = "mobilenet_v1",
     srcs = ["nets/mobilenet_v1.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_test(
@@ -378,6 +398,9 @@ py_library(
     name = "overfeat",
     srcs = ["nets/overfeat.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_test(
@@ -395,6 +418,9 @@ py_library(
     name = "resnet_utils",
     srcs = ["nets/resnet_utils.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_library(
@@ -403,6 +429,7 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":resnet_utils",
+        # "//tensorflow",
     ],
 )
 
@@ -413,6 +440,7 @@ py_test(
     shard_count = 2,
     srcs_version = "PY2AND3",
     deps = [
+        ":resnet_utils",
         ":resnet_v1",
         "//tensorflow:tensorflow_py",
     ],
@@ -424,6 +452,7 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":resnet_utils",
+        # "//tensorflow",
     ],
 )
 
@@ -434,6 +463,7 @@ py_test(
     shard_count = 2,
     srcs_version = "PY2AND3",
     deps = [
+        ":resnet_utils",
         ":resnet_v2",
         "//tensorflow:tensorflow_py",
     ],
@@ -443,6 +473,9 @@ py_library(
     name = "vgg",
     srcs = ["nets/vgg.py"],
     srcs_version = "PY2AND3",
+    deps = [
+        # "//tensorflow"
+    ],
 )
 
 py_test(
@@ -494,7 +527,6 @@ py_binary(
     srcs = ["eval_image_classifier.py"],
     deps = [
         ":dataset_factory",
-        ":model_deploy",
         ":nets_factory",
         ":preprocessing_factory",
         "//tensorflow:tensorflow_py",
