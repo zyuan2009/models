@@ -103,7 +103,7 @@ def preprocess_image(image, is_training):
 
 
 def input_fn(is_training, data_dir, batch_size, num_epochs=1,
-             num_parallel_calls=1):
+             num_parallel_calls=1, multi_gpu=False):
   """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
 
   Args:
@@ -114,6 +114,9 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1,
     num_parallel_calls: The number of records that are processed in parallel.
       This can be optimized per data set but for generally homogeneous data
       sets, should be approximately the number of available CPU cores.
+    multi_gpu: Whether this is run multi-GPU. Note that this is only required
+      currently to handle the batch leftovers, and can be removed
+      when that is handled directly by Estimator.
 
   Returns:
     A dataset that can be used for iteration.
@@ -121,16 +124,31 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1,
   filenames = get_filenames(is_training, data_dir)
   dataset = tf.data.FixedLengthRecordDataset(filenames, _RECORD_BYTES)
 
+  num_images = is_training and _NUM_IMAGES['train'] or _NUM_IMAGES['validation']
+
   return resnet.process_record_dataset(dataset, is_training, batch_size,
-      _NUM_IMAGES['train'], parse_record, num_epochs, num_parallel_calls)
+      _NUM_IMAGES['train'], parse_record, num_epochs, num_parallel_calls,
+      examples_per_epoch=num_images, multi_gpu=multi_gpu)
+
+
+def get_synth_input_fn():
+  return resnet.get_synth_input_fn(_HEIGHT, _WIDTH, _NUM_CHANNELS, _NUM_CLASSES)
 
 
 ###############################################################################
 # Running the model
 ###############################################################################
 class Cifar10Model(resnet.Model):
-  def __init__(self, resnet_size, data_format=None):
+
+  def __init__(self, resnet_size, data_format=None, num_classes=_NUM_CLASSES):
     """These are the parameters that work for CIFAR-10 data.
+
+    Args:
+      resnet_size: The number of convolutional layers needed in the model.
+      data_format: Either 'channels_first' or 'channels_last', specifying which
+        data format to use when setting up the model.
+      num_classes: The number of output classes needed from the model. This
+        enables users to extend the same model to their own datasets.
     """
     if resnet_size % 6 != 2:
       raise ValueError('resnet_size must be 6n + 2:', resnet_size)
@@ -139,7 +157,7 @@ class Cifar10Model(resnet.Model):
 
     super(Cifar10Model, self).__init__(
         resnet_size=resnet_size,
-        num_classes=_NUM_CLASSES,
+        num_classes=num_classes,
         num_filters=16,
         kernel_size=3,
         conv_stride=1,
@@ -181,11 +199,13 @@ def cifar10_model_fn(features, labels, mode, params):
                                 learning_rate_fn=learning_rate_fn,
                                 momentum=0.9,
                                 data_format=params['data_format'],
-                                loss_filter_fn=loss_filter_fn)
+                                loss_filter_fn=loss_filter_fn,
+                                multi_gpu=params['multi_gpu'])
 
 
 def main(unused_argv):
-  resnet.resnet_main(FLAGS, cifar10_model_fn, input_fn)
+  input_function = FLAGS.use_synthetic_data and get_synth_input_fn() or input_fn
+  resnet.resnet_main(FLAGS, cifar10_model_fn, input_function)
 
 
 if __name__ == '__main__':

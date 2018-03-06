@@ -54,35 +54,57 @@ def get_filenames(is_training, data_dir):
         for i in range(128)]
 
 
-def parse_record(raw_record, is_training):
-  """Parse an ImageNet record from `value`."""
-  keys_to_features = {
-      'image/encoded':
-          tf.FixedLenFeature((), tf.string, default_value=''),
-      'image/format':
-          tf.FixedLenFeature((), tf.string, default_value='jpeg'),
-      'image/class/label':
-          tf.FixedLenFeature([], dtype=tf.int64, default_value=-1),
-      'image/class/text':
-          tf.FixedLenFeature([], dtype=tf.string, default_value=''),
-      'image/object/bbox/xmin':
-          tf.VarLenFeature(dtype=tf.float32),
-      'image/object/bbox/ymin':
-          tf.VarLenFeature(dtype=tf.float32),
-      'image/object/bbox/xmax':
-          tf.VarLenFeature(dtype=tf.float32),
-      'image/object/bbox/ymax':
-          tf.VarLenFeature(dtype=tf.float32),
-      'image/object/class/label':
-          tf.VarLenFeature(dtype=tf.int64),
+def _parse_example_proto(example_serialized):
+  """Parses an Example proto containing a training example of an image.
+
+  The dataset contains serialized Example protocol buffers.
+  The Example proto is expected to contain features named
+  image/encoded (a JPEG-encoded string) and image/class/label (int)
+
+  Args:
+    example_serialized: scalar Tensor tf.string containing a serialized
+      Example protocol buffer.
+
+  Returns:
+    image_buffer: Tensor tf.string containing the contents of a JPEG file.
+    label: Tensor tf.int64 containing the label.
+  """
+  # Dense features in Example proto.
+  feature_map = {
+      'image/encoded': tf.FixedLenFeature([], dtype=tf.string,
+                                          default_value=''),
+      'image/class/label': tf.FixedLenFeature([1], dtype=tf.int64,
+                                              default_value=-1)
   }
 
-  parsed = tf.parse_single_example(raw_record, keys_to_features)
+  features = tf.parse_single_example(example_serialized, feature_map)
 
-  image = tf.image.decode_image(
-      tf.reshape(parsed['image/encoded'], shape=[]),
-      _NUM_CHANNELS)
-  image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+  return features['image/encoded'], features['image/class/label']
+
+
+def parse_record(raw_record, is_training):
+  """Parses a record containing a training example of an image.
+
+  The input record is parsed into a label and image, and the image is passed
+  through preprocessing steps (cropping, flipping, and so on).
+
+  Args:
+    raw_record: scalar Tensor tf.string containing a serialized
+      Example protocol buffer.
+    is_training: A boolean denoting whether the input is for training.
+
+  Returns:
+    Tuple with processed image tensor and one-hot-encoded label tensor.
+"""
+  image, label = _parse_example_proto(raw_record)
+
+  # Decode the string as an RGB JPEG.
+  # Note that the resulting image contains an unknown height and width
+  # that is set dynamically by decode_jpeg. In other words, the height
+  # and width of image is unknown at compile-time.
+  # Results in a 3-D int8 Tensor. This will be converted to a float later,
+  # during resizing.
+  image = tf.image.decode_jpeg(image, channels=_NUM_CHANNELS)
 
   image = vgg_preprocessing.preprocess_image(
       image=image,
@@ -90,15 +112,14 @@ def parse_record(raw_record, is_training):
       output_width=_DEFAULT_IMAGE_SIZE,
       is_training=is_training)
 
-  label = tf.cast(
-      tf.reshape(parsed['image/class/label'], shape=[]),
-      dtype=tf.int32)
+  label = tf.cast(tf.reshape(label, shape=[]), dtype=tf.int32)
+  label = tf.one_hot(label, _NUM_CLASSES)
 
-  return image, tf.one_hot(label, _NUM_CLASSES)
+  return image, label
 
 
 def input_fn(is_training, data_dir, batch_size, num_epochs=1,
-             num_parallel_calls=1):
+             num_parallel_calls=1, multi_gpu=False):
   """Input function which provides batches for train or eval.
   Args:
     is_training: A boolean denoting whether the input is for training.
@@ -108,6 +129,9 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1,
     num_parallel_calls: The number of records that are processed in parallel.
       This can be optimized per data set but for generally homogeneous data
       sets, should be approximately the number of available CPU cores.
+    multi_gpu: Whether this is run multi-GPU. Note that this is only required
+      currently to handle the batch leftovers, and can be removed
+      when that is handled directly by Estimator.
 
   Returns:
     A dataset that can be used for iteration.
@@ -119,19 +143,36 @@ def input_fn(is_training, data_dir, batch_size, num_epochs=1,
     # Shuffle the input files
     dataset = dataset.shuffle(buffer_size=_NUM_TRAIN_FILES)
 
+  num_images = is_training and _NUM_IMAGES['train'] or _NUM_IMAGES['validation']
+
   # Convert to individual records
   dataset = dataset.flat_map(tf.data.TFRecordDataset)
 
-  return resnet.process_record_dataset(dataset, is_training, batch_size,
-      _SHUFFLE_BUFFER, parse_record, num_epochs, num_parallel_calls)
+  return resnet.process_record_dataset(
+      dataset, is_training, batch_size, _SHUFFLE_BUFFER, parse_record,
+      num_epochs, num_parallel_calls, examples_per_epoch=num_images,
+      multi_gpu=multi_gpu)
+
+
+def get_synth_input_fn():
+  return resnet.get_synth_input_fn(
+        _DEFAULT_IMAGE_SIZE, _DEFAULT_IMAGE_SIZE, _NUM_CHANNELS, _NUM_CLASSES)
 
 
 ###############################################################################
 # Running the model
 ###############################################################################
 class ImagenetModel(resnet.Model):
-  def __init__(self, resnet_size, data_format=None):
+
+  def __init__(self, resnet_size, data_format=None, num_classes=_NUM_CLASSES):
     """These are the parameters that work for Imagenet data.
+
+    Args:
+      resnet_size: The number of convolutional layers needed in the model.
+      data_format: Either 'channels_first' or 'channels_last', specifying which
+        data format to use when setting up the model.
+      num_classes: The number of output classes needed from the model. This
+        enables users to extend the same model to their own datasets.
     """
 
     # For bigger models, we want to use "bottleneck" layers
@@ -144,7 +185,7 @@ class ImagenetModel(resnet.Model):
 
     super(ImagenetModel, self).__init__(
         resnet_size=resnet_size,
-        num_classes=_NUM_CLASSES,
+        num_classes=num_classes,
         num_filters=64,
         kernel_size=7,
         conv_stride=2,
@@ -195,11 +236,13 @@ def imagenet_model_fn(features, labels, mode, params):
                                 learning_rate_fn=learning_rate_fn,
                                 momentum=0.9,
                                 data_format=params['data_format'],
-                                loss_filter_fn=None)
+                                loss_filter_fn=None,
+                                multi_gpu=params['multi_gpu'])
 
 
 def main(unused_argv):
-  resnet.resnet_main(FLAGS, imagenet_model_fn, input_fn)
+  input_function = FLAGS.use_synthetic_data and get_synth_input_fn() or input_fn
+  resnet.resnet_main(FLAGS, imagenet_model_fn, input_function)
 
 
 if __name__ == '__main__':

@@ -27,6 +27,9 @@ import cifar10_main
 tf.logging.set_verbosity(tf.logging.ERROR)
 
 _BATCH_SIZE = 128
+_HEIGHT = 32
+_WIDTH = 32
+_NUM_CHANNELS = 3
 
 
 class BaseTest(tf.test.TestCase):
@@ -34,8 +37,8 @@ class BaseTest(tf.test.TestCase):
   def test_dataset_input_fn(self):
     fake_data = bytearray()
     fake_data.append(7)
-    for i in range(3):
-      for _ in range(1024):
+    for i in range(_NUM_CHANNELS):
+      for _ in range(_HEIGHT * _WIDTH):
         fake_data.append(i)
 
     _, filename = mkstemp(dir=self.get_temp_dir())
@@ -49,8 +52,8 @@ class BaseTest(tf.test.TestCase):
         lambda val: cifar10_main.parse_record(val, False))
     image, label = fake_dataset.make_one_shot_iterator().get_next()
 
-    self.assertEqual(label.get_shape().as_list(), [10])
-    self.assertEqual(image.get_shape().as_list(), [32, 32, 3])
+    self.assertAllEqual(label.shape, (10,))
+    self.assertAllEqual(image.shape, (_HEIGHT, _WIDTH, _NUM_CHANNELS))
 
     with self.test_session() as sess:
       image, label = sess.run([image, label])
@@ -61,19 +64,17 @@ class BaseTest(tf.test.TestCase):
         for pixel in row:
           self.assertAllClose(pixel, np.array([-1.225, 0., 1.225]), rtol=1e-3)
 
-  def input_fn(self):
-    features = tf.random_uniform([_BATCH_SIZE, 32, 32, 3])
-    labels = tf.random_uniform(
-        [_BATCH_SIZE], maxval=9, dtype=tf.int32)
-    return features, tf.one_hot(labels, 10)
-
-  def cifar10_model_fn_helper(self, mode):
-    features, labels = self.input_fn()
+  def cifar10_model_fn_helper(self, mode, multi_gpu=False):
+    input_fn = cifar10_main.get_synth_input_fn()
+    dataset = input_fn(True, '', _BATCH_SIZE)
+    iterator = dataset.make_one_shot_iterator()
+    features, labels = iterator.get_next()
     spec = cifar10_main.cifar10_model_fn(
         features, labels, mode, {
             'resnet_size': 32,
             'data_format': 'channels_last',
             'batch_size': _BATCH_SIZE,
+            'multi_gpu': multi_gpu
         })
 
     predictions = spec.predictions
@@ -98,11 +99,25 @@ class BaseTest(tf.test.TestCase):
   def test_cifar10_model_fn_train_mode(self):
     self.cifar10_model_fn_helper(tf.estimator.ModeKeys.TRAIN)
 
+  def test_cifar10_model_fn_train_mode_multi_gpu(self):
+    self.cifar10_model_fn_helper(tf.estimator.ModeKeys.TRAIN, multi_gpu=True)
+
   def test_cifar10_model_fn_eval_mode(self):
     self.cifar10_model_fn_helper(tf.estimator.ModeKeys.EVAL)
 
   def test_cifar10_model_fn_predict_mode(self):
     self.cifar10_model_fn_helper(tf.estimator.ModeKeys.PREDICT)
+
+  def test_cifar10model_shape(self):
+    batch_size = 135
+    num_classes = 246
+
+    model = cifar10_main.Cifar10Model(
+        32, data_format='channels_last', num_classes=num_classes)
+    fake_input = tf.random_uniform([batch_size, _HEIGHT, _WIDTH, _NUM_CHANNELS])
+    output = model(fake_input, training=True)
+
+    self.assertAllEqual(output.shape, (batch_size, num_classes))
 
 
 if __name__ == '__main__':
